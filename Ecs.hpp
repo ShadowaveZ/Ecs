@@ -8,26 +8,15 @@
 namespace Ecs {
     using Type = std::vector<unsigned char>;
     using TypeHash = std::bitset<64>;
-
-    using Chunk = std::vector<void*>;
-
-    template<typename Component>
-    struct ComponentArray {
-        Component* data;
-
-        ComponentArray(void* pointer);
-
-        Component& operator[](unsigned int index);
-    };
+    using EntityId = unsigned int;
 
     struct Archetype {
         Type type;
-        std::vector<Chunk> components;
-        std::vector<unsigned int> entities;
-        unsigned int count;
+        std::vector<std::vector<void*>> components;
+        std::vector<EntityId> entities;
 
-        template<typename Component>
-        ComponentArray<Component> GetChunk();
+        template<typename ComponentType>
+        ComponentType* GetChunk();
     };
 
     struct Record {
@@ -36,26 +25,23 @@ namespace Ecs {
     };
 
     struct World {
-        std::unordered_map<unsigned int, Record> entities;
+        std::unordered_map<EntityId, Record> entities;
         std::unordered_map<TypeHash, Archetype*> archetypes;
-        std::queue<unsigned int> removed;
-        unsigned int entityIndex = 0;
+        std::queue<EntityId> removed;
+        EntityId entityIndex = 0;
         bool shouldStop;
 
-        unsigned int CreateEntity();
+        EntityId CreateEntity();
         Archetype* GetArchetype(TypeHash hash);
-        Record& GetRecord(unsigned int id);
 
         ~World();
 
         bool Run();
-
-        friend class Entity;
     };
 
     struct Entity {
         World* world;
-        unsigned int id;
+        EntityId id;
 
         Entity(World& world);
         ~Entity();
@@ -88,8 +74,8 @@ namespace Ecs {
     }
 
     TypeHash Hash(Type type) {
-        unsigned int hash = 0;
-        for(unsigned int component : type)
+        long long hash = 0;
+        for(unsigned char component : type)
             hash |= (1ull << component);
         return TypeHash(hash);
     }
@@ -98,40 +84,38 @@ namespace Ecs {
         : world(&world), id(world.CreateEntity()) {}
 
     Entity::~Entity(){
-        Record& record = world->GetRecord(id);
+        Record& record = world->entities.at(id);
         Archetype* archetype = record.archetype;
-        for(unsigned int index = 0; index < archetype->type.size(); index++) {
-            archetype->components[index][record.index] = archetype->components[index][archetype->count - 1];
+        for(unsigned char index = 0; index < archetype->type.size(); index++) {
+            archetype->components[index][record.index] = archetype->components[index][archetype->entities.size() - 1];
             archetype->components[index].pop_back();
         }
-        archetype->entities[record.index] = archetype->entities[archetype->count - 1];
+        archetype->entities[record.index] = archetype->entities[archetype->entities.size() - 1];
         archetype->entities.pop_back();
-        world->GetRecord(archetype->entities[record.index]).index = record.index;
-        archetype->count--;
+        world->entities.at(archetype->entities[record.index]).index = record.index;
         world->entities.erase(id);
         world->removed.push(id);
     }
 
     template<typename ComponentType>
     Entity& Entity::Add(){
-        Record& record = world->GetRecord(id);
+        Record& record = world->entities.at(id);
         Archetype* archetype = record.archetype;
         std::queue<void*> data;
-        for(unsigned int index = 0; index < archetype->type.size(); index++) {
+        for(unsigned char index = 0; index < archetype->type.size(); index++) {
             data.push(archetype->components[index][record.index]);
-            archetype->components[index][record.index] = archetype->components[index][archetype->count - 1];
+            archetype->components[index][record.index] = archetype->components[index][archetype->entities.size() - 1];
             archetype->components[index].pop_back();
         }
-        archetype->entities[record.index] = archetype->entities[archetype->count - 1];
+        archetype->entities[record.index] = archetype->entities[archetype->entities.size() - 1];
         archetype->entities.pop_back();
-        world->GetRecord(archetype->entities[record.index]).index = record.index;
-        archetype->count--;
-        unsigned int componentId = Component<ComponentType>();
+        world->entities.at(archetype->entities[record.index]).index = record.index;
+        unsigned char componentId = Component<ComponentType>();
         TypeHash hash = Hash(archetype->type);
         Type type = { componentId };
         hash |= Hash(type);
         archetype = world->GetArchetype(hash);
-        for(unsigned int index = 0; index < archetype->type.size(); index++) {
+        for(unsigned char index = 0; index < archetype->type.size(); index++) {
             if(archetype->type[index] == componentId)
                 archetype->components[index].push_back(new ComponentType());
             else {
@@ -140,7 +124,6 @@ namespace Ecs {
             }
         }
         record.archetype = archetype;
-        record.index = record.archetype->count++;
         archetype->entities.push_back(id);
         return *this;
     }
@@ -149,10 +132,10 @@ namespace Ecs {
     Entity& Entity::Set(Arguments&&... arguments){
         if(!Has<ComponentType>())
             Add<ComponentType>();
-        Record& record = world->GetRecord(id);
+        Record& record = world->entities.at(id);
         Archetype* archetype = record.archetype;
-        unsigned int componentId = Component<ComponentType>();
-        for(unsigned int index = 0; index < archetype->type.size(); index++) {
+        unsigned char componentId = Component<ComponentType>();
+        for(unsigned char index = 0; index < archetype->type.size(); index++) {
             if(archetype->type[index] == componentId)
                 archetype->components[index][record.index] = new ComponentType{arguments...};
         }
@@ -161,40 +144,40 @@ namespace Ecs {
 
     template<typename ComponentType>
     Entity& Entity::Remove(){
-        Record& record = world->GetRecord(id);
+        Record& record = world->entities.at(id);
         Archetype* archetype = record.archetype;
-        unsigned int componentId = Component<ComponentType>();
+        unsigned char componentId = Component<ComponentType>();
         std::queue<void*> data;
-        for(unsigned int index = 0; index < archetype->type.size(); index++) {
+        for(unsigned char index = 0; index < archetype->type.size(); index++) {
             if(archetype->type[index] == componentId) {
                 (*(ComponentType*)archetype->components[index][record.index]).~ComponentType();
             } else 
                 data.push(archetype->components[index][record.index]);
-            archetype->components[index][record.index] = archetype->components[index][archetype->count - 1];
+            archetype->components[index][record.index] = archetype->components[index][archetype->entities.size() - 1];
             archetype->components[index].pop_back();
         }
-        archetype->entities[record.index] = archetype->entities[archetype->count - 1];
+        archetype->entities[record.index] = archetype->entities[archetype->entities.size() - 1];
         archetype->entities.pop_back();
-        world->GetRecord(archetype->entities[record.index]).index = record.index;
-        archetype->count--;
+        world->entities.at(archetype->entities[record.index]).index = record.index;
         TypeHash hash = Hash(archetype->type);
         Type type = { componentId };
         hash ^= Hash(type);
         archetype = world->GetArchetype(hash);
-        for(unsigned int index = 0; index < archetype->type.size(); index++) {
+        for(unsigned char index = 0; index < archetype->type.size(); index++) {
             archetype->components[index].push_back(data.front());
             data.pop();
         }
         record.archetype = archetype;
-        record.index = record.archetype->count++;
+        archetype->entities.push_back(id);
+        record.index = archetype->entities.size();
         return *this;
     }
 
     template<typename ComponentType>
     bool Entity::Has(){
-        Archetype* archetype = world->GetRecord(id).archetype;
-        unsigned int componentId = Component<ComponentType>();
-        for(unsigned int index = 0; index < archetype->type.size(); index++) {
+        Archetype* archetype = world->entities.at(id).archetype;
+        unsigned char componentId = Component<ComponentType>();
+        for(unsigned char index = 0; index < archetype->type.size(); index++) {
             if(archetype->type[index] == componentId)
                 return true;
         }
@@ -203,14 +186,14 @@ namespace Ecs {
 
     template<typename ComponentType>
     ComponentType& Entity::Get(){
-        Record& record = world->GetRecord(id);
+        Record& record = world->entities.at(id);
         Archetype* archetype = record.archetype;
-        unsigned int componentId = Component<ComponentType>();
-        for(unsigned int index = 0; index < archetype-> type.size(); index++){
+        unsigned char componentId = Component<ComponentType>();
+        for(unsigned char index = 0; index < archetype-> type.size(); index++){
             if(archetype->type[index] == componentId)
                 return *(ComponentType*)archetype->components[index][record.index];
         }
-        throw std::invalid_argument("Does not exist");
+        throw std::invalid_argument("Component does not exist");
     }
 
     template<typename... ComponentTypes, typename... Arguments, typename Function>
@@ -219,33 +202,24 @@ namespace Ecs {
         for(auto& pair : world.archetypes){
             std::bitset<64> temporary = hash;
             if((temporary &= pair.first) == hash){
-                for(unsigned int id : pair.second->entities)
+                for(EntityId id : pair.second->entities)
                     function(pair.second->GetChunk<ComponentTypes>()[id]..., arguments...);
             }
         }
     }
 
     template<typename ComponentType>
-    ComponentArray<ComponentType>::ComponentArray(void* pointer)
-        : data((ComponentType*)pointer) {}
-
-    template<typename ComponentType>
-    ComponentType& ComponentArray<ComponentType>::operator[](unsigned int index){
-        return data[index];
-    }
-
-    template<typename ComponentType>
-    ComponentArray<ComponentType> Archetype::GetChunk(){
-        unsigned int componentId = Component<ComponentType>();
-        for(unsigned int index = 0; index < type.size(); index++){
+    ComponentType* Archetype::GetChunk(){
+        unsigned char componentId = Component<ComponentType>();
+        for(unsigned char index = 0; index < type.size(); index++){
             if(type[index] == componentId)
-                return ComponentArray<ComponentType>(*components[index].data());
+                return (ComponentType*)(*components[index].data());
         }
-        throw std::invalid_argument("Does not exist");
+        throw std::invalid_argument("Chunk does not exist");
     }
     
-    unsigned int World::CreateEntity() {
-        unsigned int id;
+    EntityId World::CreateEntity() {
+        EntityId id;
         if(removed.empty())
             id = entityIndex++;
         else {
@@ -254,17 +228,10 @@ namespace Ecs {
         }
         Record record;
         record.archetype = GetArchetype(TypeHash());
+        record.index = record.archetype->entities.size();
         record.archetype->entities.push_back(id);
-        record.index = record.archetype->count;
-        record.archetype->count++;
         entities.insert({id, record});
         return id;
-    }
-    Record& World::GetRecord(unsigned int id) {
-        std::unordered_map<unsigned int, Record>::iterator iterator = entities.find(id);
-        if(iterator != entities.end())
-            return iterator->second;
-        throw std::invalid_argument("Entity id does not exist");
     }
 
     Archetype* World::GetArchetype(TypeHash hash) {
@@ -272,7 +239,7 @@ namespace Ecs {
         if(iterator != archetypes.end())
             return iterator->second;
         Type type;
-        for(unsigned int index = 0; index < hash.size(); index++) {
+        for(unsigned char index = 0; index < hash.size(); index++) {
             if(hash[index] == 1)
                 type.push_back(index);
         }
