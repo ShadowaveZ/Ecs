@@ -49,10 +49,11 @@ namespace Ecs {
         Record& record = world->entities.at(id);
         Archetype* archetype = record.archetype;
         for(int index = 0; index < archetype->type.size(); index++) {
-            archetype->components[index][record.index] = archetype->components[index][archetype->entities.size() - 1];
+            archetype->components[index].emplace(archetype->components[index].begin() + record.index, archetype->components[index][archetype->entities.size() - 1]);
+            delete archetype->components[index].back();
             archetype->components[index].pop_back();
         }
-        archetype->entities[record.index] = archetype->entities[archetype->entities.size() - 1];
+        archetype->entities.emplace(archetype->entities.begin() + record.index, archetype->entities[archetype->entities.size() - 1]);
         archetype->entities.pop_back();
         world->entities.at(archetype->entities[record.index]).index = record.index;
         world->entities.erase(id);
@@ -66,12 +67,12 @@ namespace Ecs {
         std::queue<void*> data;
         for(int index = 0; index < archetype->type.size(); index++) {
             data.push(archetype->components[index][record.index]);
-            archetype->components[index][record.index] = archetype->components[index][archetype->entities.size() - 1];
+            archetype->components[index].emplace(archetype->components[index].begin() + record.index, archetype->components[index][archetype->entities.size() - 1]);
             archetype->components[index].pop_back();
         }
-        archetype->entities[record.index] = archetype->entities[archetype->entities.size() - 1];
+        archetype->entities.emplace(archetype->entities.begin() + record.index, archetype->entities[archetype->entities.size() - 1]);
         archetype->entities.pop_back();
-        world->entities.at(archetype->entities[record.index]).index = record.index;
+        world->entities[archetype->entities[record.index]].index = record.index;
         ComponentId componentId = Component<ComponentType>();
         TypeHash hash = Hash(archetype->type);
         hash |= Hash({componentId});
@@ -101,7 +102,7 @@ namespace Ecs {
         ComponentId componentId = Component<ComponentType>();
         for(int index = 0; index < archetype->type.size(); index++) {
             if(archetype->type[index] == componentId)
-                archetype->components[index][record.index] = new ComponentType{arguments...};
+                (*(ComponentType*)archetype->components[index][record.index]) = ComponentType{arguments...};
         }
         return *this;
     }

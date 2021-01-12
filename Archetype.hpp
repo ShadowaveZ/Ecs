@@ -46,7 +46,7 @@ namespace Ecs {
     ComponentType* Archetype::Data(){
         unsigned char componentId = Component<ComponentType>();
         for(unsigned char index = 0; index < type.size(); index++){
-            if(type[index] == componentId)
+            if(type.at(index) == componentId)
                 return (ComponentType*)(*components[index].data());
         }
         return nullptr;
